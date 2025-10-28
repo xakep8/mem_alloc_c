@@ -1,6 +1,14 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 // #include <sys/mman.h>
+
+#define EXIT_FAILURE 1
+
+#define throw(msg) {\
+	fprintf(stderr, "Error: %s\n", msg);\
+	exit(EXIT_FAILURE);\
+}
 
 typedef struct{
 	unsigned int block_size : 8;
@@ -22,6 +30,14 @@ also this will help me to find free blocks of memory when needed.
 */
 struct mem_block* head = NULL;
 
+/*
+seems to be working fine for now.
+didn't do any such optimizations yet.
+or the alignment of the memory blocks.
+Probably will do it later.
+
+Future-self: if you see this, please optimize this code.
+*/
 void* alloc(size_t size){
 	mem_block* ptr = (mem_block*)sbrk(size + sizeof(size_free));
 	if (!ptr) return NULL;
@@ -42,8 +58,7 @@ void dealloc(void* p){
 int main(){
 	int* p = (int*)alloc(4 * sizeof(int));
 	if (!p) {
-		fprintf(stderr, "Memory allocation failed\n");
-		return 1;
+		throw("Memory allocation failed");
 	}
 	for (int i = 0; i < 4; i++) {
 		p[i] = i * 10;
