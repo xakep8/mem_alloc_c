@@ -1,3 +1,10 @@
 cmake_*
 CMakeFiles*
 CMakeCache*
+.DS_Store
+.vscode/
+build/
+*.log
+*.tmp
+Makefile
+mem_alloc
