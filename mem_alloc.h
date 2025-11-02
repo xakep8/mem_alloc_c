@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
-// #include <sys/mman.h>
+#include <stddef.h>
+#include <sys/mman.h>
+#include <string.h>
 
 #define EXIT_FAILURE 1
 
@@ -21,7 +23,7 @@ void *current_brk = NULL;						  // current break pointer
 
 typedef struct
 {
-	unsigned int block_size : 8;
+	size_t block_size;
 	unsigned int free : 1;
 } size_free;
 
@@ -29,11 +31,11 @@ typedef struct
 Structure to represent a memory block in the pool.
 Basic list allocator structure.
  */
-typedef struct
+typedef struct mem_block
 {
 	size_free info;
-	char data[0];
 	struct mem_block *next;
+	char data[0];
 } mem_block;
 
 /*
@@ -46,16 +48,12 @@ this pool.
 */
 void init_allocate_memory_pool()
 {
-	memory_pool = sbrk(size_of_memory_pool);
-	if (memory_pool == (void *)-1)
+	memory_pool = mmap(NULL, size_of_memory_pool, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (memory_pool == MAP_FAILED)
 	{
 		throw("Initial memory pool allocation failed");
 	}
-	mem_block *first_block = (mem_block *)memory_pool;
-	first_block->info.block_size = 1024 * 1024 - sizeof(size_free);
-	first_block->info.free = 1;
-	first_block->next = NULL;
-	head = first_block;
+	current_brk = memory_pool;
 }
 
 /*
@@ -79,29 +77,41 @@ void *alloc(size_t size)
 	{
 		init_allocate_memory_pool();
 	}
-	size_t total_size = size + sizeof(size_free);
+	size_t total_size = size + sizeof(mem_block);
 	size_t aligned_size = (total_size + 7) & ~7; // align to 8 bytes
 	// size to be allocate + current break pointer should not exceed memory pool
-	if (current_brk + aligned_size > memory_pool + size_of_memory_pool)
+	if ((char *)current_brk + aligned_size > (char *)memory_pool + size_of_memory_pool)
 	{
 		throw("Out of memory in the memory pool");
 	}
-	mem_block *ptr = (mem_block *)current_brk + aligned_size;
-	if (!ptr)
-		return NULL;
-
+	mem_block *ptr = (mem_block *)current_brk;
 	ptr->info.block_size = aligned_size;
 	ptr->info.free = 0;
-	ptr->next = NULL;
-	current_brk += aligned_size;
-	return ptr;
+	ptr->next = head;
+	head = ptr;
+
+	current_brk = (char *)current_brk + aligned_size;
+	return ptr->data;
+}
+
+void cleanup_memory_pool()
+{
+	if (memory_pool)
+	{
+		munmap(memory_pool, size_of_memory_pool);
+		memory_pool = NULL;
+		current_brk = NULL;
+		head = NULL;
+	}
 }
 
 void dealloc(void *p)
 {
 	if (!p)
 		return;
-	mem_block *block = (mem_block *)((char *)p - sizeof(size_free));
+	mem_block *block = (mem_block *)((char *)p - offsetof(mem_block, data));
+	size_t payload = block->info.block_size - sizeof(mem_block);
+	memset(block->data, 0, payload);
 	block->info.free = 1;
 }
 
