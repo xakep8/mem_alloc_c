@@ -3,23 +3,6 @@
 #include <stdlib.h>
 // #include <sys/mman.h>
 
-/*
-How about I create a page table for the memory pool?
-Each entry in the page table will represent a block of memory.
-The entry will have information about whether the block is free or allocated,
-and the size of the block.
-
-This way, when a request for memory allocation comes in,
-I can look for a free block in the page table that is large enough to satisfy the request.
-If found, I can mark that block as allocated in the page table and return a pointer to
-the memory block.
-
-When a request for deallocation comes in, I can mark the corresponding block as free in the page table.
-
-Well I think a list allocator would be more efficient for now I'll keep it simple.
-later I'll create a hybrid allocator using both list and page table.
-*/
-
 #define EXIT_FAILURE 1
 
 #define throw(msg)                           \
@@ -28,7 +11,13 @@ later I'll create a hybrid allocator using both list and page table.
 		exit(EXIT_FAILURE);                  \
 	}
 
-void *memory_pool = NULL; // allocate 10 MB initially
+/*
+I'll track the memory pool with the start pointer in place and the size of the pool
+is known and then the current pointer will increment and decrement as per the allocations
+*/
+const int size_of_memory_pool = 10 * 1024 * 1024; // 10 MB
+void *memory_pool = NULL;						  // allocate 10 MB initially
+void *current_brk = NULL;						  // current break pointer
 
 typedef struct
 {
@@ -37,6 +26,8 @@ typedef struct
 } size_free;
 
 /*
+Structure to represent a memory block in the pool.
+Basic list allocator structure.
  */
 typedef struct
 {
@@ -55,7 +46,7 @@ this pool.
 */
 void init_allocate_memory_pool()
 {
-	memory_pool = sbrk(10 * 1024 * 1024); // 10 MB
+	memory_pool = sbrk(size_of_memory_pool);
 	if (memory_pool == (void *)-1)
 	{
 		throw("Initial memory pool allocation failed");
@@ -90,13 +81,19 @@ void *alloc(size_t size)
 	}
 	size_t total_size = size + sizeof(size_free);
 	size_t aligned_size = (total_size + 7) & ~7; // align to 8 bytes
-	mem_block *ptr = (mem_block *)sbrk(aligned_size);
+	// size to be allocate + current break pointer should not exceed memory pool
+	if (current_brk + aligned_size > memory_pool + size_of_memory_pool)
+	{
+		throw("Out of memory in the memory pool");
+	}
+	mem_block *ptr = (mem_block *)current_brk + aligned_size;
 	if (!ptr)
 		return NULL;
 
 	ptr->info.block_size = aligned_size;
 	ptr->info.free = 0;
 	ptr->next = NULL;
+	current_brk += aligned_size;
 	return ptr;
 }
 
