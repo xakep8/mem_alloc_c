@@ -4,8 +4,7 @@
 #include <stddef.h>
 #include <sys/mman.h>
 #include <string.h>
-
-#define EXIT_FAILURE 1
+#include <stdalign.h>
 
 #define throw(msg)                           \
 	{                                        \
@@ -38,6 +37,15 @@ typedef struct mem_block
 	char data[0];
 } mem_block;
 
+enum
+{
+	MEM_ALIGNMENT = _Alignof(max_align_t)
+};
+static inline size_t align_size(size_t n, size_t a)
+{
+	return (n + a - 1) & ~(a - 1);
+}
+
 /*
 I will use this to keep track of the memory segments allocated.
 This will help me defragment the memory later on.
@@ -62,21 +70,19 @@ void init_allocate_memory_pool()
 		throw("Initial memory pool allocation failed");
 	}
 	current_brk = memory_pool;
-	tail = NULL;
-	head = NULL;
+	tail = head = NULL;
 }
 
-static void maybe_split_block(mem_block *block, size_t size)
+static void maybe_split_block(mem_block *block, size_t needed_aligned)
 {
-	size_t total_size = size + sizeof(mem_block);
-	if (block->info.block_size >= total_size + sizeof(mem_block) + 8) // minimum split size
+	if (block->info.block_size >= needed_aligned + sizeof(mem_block) + 8) // minimum split size
 	{
-		mem_block *new_block = (mem_block *)((char *)block + total_size);
-		new_block->info.block_size = block->info.block_size - total_size;
+		mem_block *new_block = (mem_block *)((char *)block + needed_aligned);
+		new_block->info.block_size = block->info.block_size - needed_aligned;
 		new_block->info.free = 1;
 		new_block->next = block->next;
 
-		block->info.block_size = total_size;
+		block->info.block_size = needed_aligned;
 		block->next = new_block;
 		if (tail == block)
 			tail = new_block;
@@ -98,14 +104,14 @@ void *alloc(size_t size)
 		init_allocate_memory_pool();
 	}
 	size_t total_size = size + sizeof(mem_block);
-	size_t aligned_size = (total_size + 7) & ~7; // align to 8 bytes
+	size_t aligned_size = align_size(total_size, MEM_ALIGNMENT); // align to 8 bytes
 
 	for (mem_block *cur = head; cur != NULL; cur = cur->next)
 	{
 		if (cur->info.free && cur->info.block_size >= aligned_size)
 		{
 			cur->info.free = 0;
-			maybe_split_block(cur, size);
+			maybe_split_block(cur, aligned_size);
 			return cur->data;
 		}
 	}
@@ -118,11 +124,10 @@ void *alloc(size_t size)
 	mem_block *ptr = (mem_block *)current_brk;
 	ptr->info.block_size = aligned_size;
 	ptr->info.free = 0;
-	ptr->next = head;
+	ptr->next = NULL;
 	if (!head)
 	{
-		head = ptr;
-		tail = ptr;
+		head = tail = ptr;
 	}
 	else
 	{
@@ -134,8 +139,19 @@ void *alloc(size_t size)
 	return ptr->data;
 }
 
+void dealloc(void *p)
+{
+	if (!p)
+		return;
+	mem_block *block = (mem_block *)((char *)p - offsetof(mem_block, data));
+	size_t payload = block->info.block_size - sizeof(mem_block);
+	memset(block->data, 0, payload);
+	block->info.free = 1;
+	coalesce_free_blocks();
+}
+
 // merge adjacent free blocks
-void coalesce_free_blocks()
+static void coalesce_free_blocks(void)
 {
 	mem_block *cur = head;
 	while (cur && cur->next)
@@ -168,15 +184,4 @@ void cleanup_memory_pool()
 		head = NULL;
 		tail = NULL;
 	}
-}
-
-void dealloc(void *p)
-{
-	if (!p)
-		return;
-	mem_block *block = (mem_block *)((char *)p - offsetof(mem_block, data));
-	size_t payload = block->info.block_size - sizeof(mem_block);
-	memset(block->data, 0, payload);
-	block->info.free = 1;
-	coalesce_free_blocks();
 }
