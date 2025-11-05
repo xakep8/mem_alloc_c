@@ -6,11 +6,13 @@
 #include <string.h>
 #include <stdalign.h>
 
+#undef throw
 #define throw(msg)                           \
+	do                                       \
 	{                                        \
 		fprintf(stderr, "Error: %s\n", msg); \
 		exit(EXIT_FAILURE);                  \
-	}
+	} while (0)
 
 /*
 I'll track the memory pool with the start pointer in place and the size of the pool
@@ -19,6 +21,8 @@ is known and then the current pointer will increment and decrement as per the al
 const int size_of_memory_pool = 10 * 1024 * 1024; // 10 MB
 void *memory_pool = NULL;						  // allocate 10 MB initially
 void *current_brk = NULL;						  // current break pointer
+
+static void coalesce_free_blocks(void);
 
 typedef struct
 {
@@ -39,7 +43,7 @@ typedef struct mem_block
 
 enum
 {
-	MEM_ALIGNMENT = _Alignof(max_align_t)
+	MEM_ALIGNMENT = 16
 };
 static inline size_t align_size(size_t n, size_t a)
 {
